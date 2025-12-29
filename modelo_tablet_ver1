@@ -1,0 +1,225 @@
+# ===========================================================================
+# MODELO HEDÓNICO PARA TABLET
+# Metodología | Basado en buenas prácticas del BLS y Eurostat
+# Analista: Arnold Jefferson Sanchez Garagate
+# Fecha: 18-09-2025
+# Producto: Tablet
+# Período base: Enero - setiembre 2025
+# ===========================================================================
+
+# --- LIBRERÍAS NECESARIAS ---
+library(tidyverse)  # Manipulación de datos
+library(caret)
+library(readxl)     # Leer Excel
+library(dplyr)
+library(sandwich)   # Errores robustos
+library(broom)
+library(knitr)
+library(car)        # VIF, pruebas estadísticas
+library(ggplot2)
+library(randomForest)
+library(lmtest)   # Para bptest
+library(nortest)  # Para alternativa a shapiro.test en muestras grandes
+library(broom)  #mostrar tabla comparativa
+library(modelsummary)
+
+
+# --- 1. CARGA DE DATOS ---
+df <- read_excel("D:/ASANCHEZ/02_ASANCHEZ_2025/05_Modelos_hedonicos/05_TABLET/bd_tablet_octubre25.xlsx", 
+                                  sheet = "FINAL") %>%
+
+    mutate(
+    # Convertir variables categóricas a factor
+    tienda = as.factor(tienda),
+    marca = as.factor(marca),
+    modelo = as.factor(modelo),
+    resolucion = as.factor(resolucion),
+    procesador = as.factor(procesador),
+    clasificacion = as.factor(clasificacion)
+   )
+
+# Transformar el precio a ln_precio
+df <- df %>% mutate(ln_precio = log(PRECIO))
+#view(df)
+
+df$almacenamiento <- as.numeric(as.character(df$almacenamiento))
+df$ram <- as.numeric(as.character(df$ram))
+df$screen_size <- as.numeric(as.character(df$screen_size))
+df$camara_frontal <- as.numeric(as.character(df$camara_frontal))
+df$camara_posterior <- as.numeric(as.character(df$camara_posterior))
+df$peso <- as.numeric(as.character(df$peso))
+df$capacidad_bateria <- as.numeric(as.character(df$capacidad_bateria))
+
+#-----------------------------------------------------------
+
+# SELECCIÓN DE MODELO BASADA EN AIC: balance entre ajuste y parsinomia
+
+#-----------------------------------------------------------------
+# Criterio de información AIC
+m_lineal <- lm(ln_precio ~ ram, data = df)
+m_cuadratico <- lm(ln_precio ~ ram + I(ram^2), data = df)
+m_log <- lm(ln_precio ~ log(ram), data = df)
+m_poly3 <- lm(ln_precio ~ poly(ram, 3, raw = TRUE), data = df)
+
+AIC(m_lineal, m_cuadratico, m_log, m_poly3)
+#-----------------------------------------------------------------#
+
+# ===========================================================================
+# MODELO ECONOMETRICO DE LAPTOP - GPU DEDIDACA
+# modelo hedónico por Mínimos Cuadrados Ordinarios (MCO)     
+# ===========================================================================
+
+# --- 1. Estimar modelos ---
+
+# Modelo 1: Lineal
+
+#Poner como base a una marca representativa en el modelo
+df$marca <- relevel(df$marca, ref = "LENOVO")
+
+model_y1 <- lm(
+  ln_precio ~ 
+    #almacenamiento +
+    poly(almacenamiento,2,raw = TRUE) +
+    ram +
+    #screen_size +
+    poly(screen_size,2,raw = TRUE) +
+    camara_frontal +
+    camara_posterior +
+    peso + 
+    capacidad_bateria +
+    marca +
+    #resolucion +
+    #tienda +
+    #mes +
+    clasificacion,  
+  data = df
+)
+
+summary(model_y1)
+
+
+# --- 2. Extraer resultados ---
+tabla <- modelsummary(
+  list("Lineal" = model_m1, "Cuadrático" = model_m2, "Logaritmo" = model_m3, "Polinomio" = model_m4),
+  gof_omit = "AIC|BIC|F|Log",
+  estimate = "{estimate} ({std.error})",
+  statistic = NULL,
+  stars = TRUE,
+  notes = c("Errores estándar entre paréntesis.",
+            "Significancia: *** p<0.01, ** p<0.05, * p<0.1")
+)
+
+# Mostrar tabla
+print(tabla)
+
+# 5. Diagnósticos del modelo ------------------------------------------------
+
+# Resumen del modelo (coeficientes, significancia, R²)
+summary(model_y1)
+
+# Factor de Inflación de Varianza (VIF) - detecta multicolinealidad
+vif_values <- vif(model_y1)
+print("🔍 FACTOR DE INFLACIÓN DE VARIANZA (VIF)")
+print(vif_values)
+# ⚠️ Advertencia si VIF > 5 o 10
+
+# Prueba de heterocedasticidad: Breusch-Pagan
+bp_test <- bptest(model_y1)
+print("🔍 PRUEBA DE BREUSCH-PAGAN (heterocedasticidad)")
+print(bp_test)
+# Si p < 0.05 → hay heterocedasticidad
+
+# Coeficientes con errores estándar robustos (recomendado para IPC)
+cat("\n📊 COEFICIENTES CON ERRORES ROBUSTOS (HC1)\n")
+coeftest(model_y1, vcov = vcovHC(model_y1, type = "HC3"))
+
+# Prueba de White (alternativa, útil si hay muchos regresores)
+white_test <- ncvTest(model_y1)
+print("🔍 PRUEBA DE WHITE (no linealidad en varianza)")
+print(white_test)
+
+# 6. Análisis gráfico de residuos -------------------------------------------
+# Deben cumplirse supuestos clásicos
+
+par(mfrow = c(2, 2))
+plot(model_y1)
+par(mfrow = c(1, 1))
+
+# Interpretación:
+# - Gráfico 1 (Residuals vs Fitted): sin patrón curvilíneo → ok
+# - Gráfico 2 (QQ Plot): puntos cerca de la línea → normalidad aceptable
+# - Gráfico 3 (Scale-Location): dispersión constante → homocedasticidad
+# - Gráfico 4 (Cook's D): puntos con influencia alta (> 0.5) deben revisarse
+
+
+
+# ===========================================================================
+# ANÁLISIS GRÁFICO ENTRE VARIABLES Y ln(PRECIO)   -  violin
+#                   (funcion)
+# ===========================================================================
+
+graficar_violin_con_box <- function(data, x, y) {
+  # Cargar ggplot2 (asegúrate de tenerlo cargado antes o aquí)
+  if (!require(ggplot2)) stop("Necesitas instalar: install.packages('ggplot2')")
+  
+  # Crear gráfico
+  ggplot(data, aes(x = {{ x }}, y = {{ y }})) +
+    geom_violin(trim = FALSE, alpha = 0.5, fill = "skyblue", color = NA) +
+    geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.8, fill = "white") +
+    geom_jitter(aes(color = {{ x }}), width = 0.2, alpha = 0.6, size = 1) +
+    theme_minimal() +
+    labs(
+      title = paste("Distribución de", deparse(substitute(y)), "por", deparse(substitute(x))),
+      x = deparse(substitute(x)),
+      y = deparse(substitute(y))
+    ) +
+    guides(color = "none") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      plot.title = element_text(size = 12)
+    )
+}
+
+graficar_violin_con_box(df, x = tienda, y = ln_precio)
+graficar_violin_con_box(df, x = marca, y = ln_precio)
+graficar_violin_con_box(df, x = resolucion, y = ln_precio)
+graficar_violin_con_box(df, x = nucleos, y = ln_precio)
+graficar_violin_con_box(df_vertical_cable, x = potencia_watts, y = ln_precio)
+graficar_violin_con_box(df_vertical_cable, x = filtro_hepa, y = ln_precio)
+graficar_violin_con_box(df_robot, x = sistema_operativo, y = ln_precio)
+graficar_violin_con_box(df_robot, x = definicion_pantalla, y = ln_precio)
+
+colnames(df)
+
+
+# ===========================================================================
+# ANÁLISIS GRÁFICO ENTRE VARIABLES Y ln(PRECIO)   -  box plot
+#                   (funcion)
+# ===========================================================================
+
+graficar_boxplot <- function(data, x, y) {
+  if (!require(ggplot2)) stop("Necesitas instalar: install.packages('ggplot2')")
+  
+  ggplot(data, aes(x = factor({{ x }}), y = {{ y }}, fill = factor({{ x }}))) +
+    geom_boxplot(alpha = 0.7, outlier.color = "red", outlier.size = 1.5) +
+    theme_minimal() +
+    labs(
+      title = paste("Distribución de", deparse(substitute(y)), "por", deparse(substitute(x))),
+      x = deparse(substitute(x)),
+      y = deparse(substitute(y))
+    ) +
+    guides(fill = "none") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      plot.title = element_text(size = 12)
+    )
+}
+
+graficar_boxplot(df, x = capacidad_bateria, y = ln_precio)
+graficar_boxplot(df, x = peso, y = ln_precio)
+graficar_boxplot(df, x = almacenamiento, y = ln_precio)
+graficar_boxplot(df, x = ram, y = ln_precio)
+graficar_boxplot(df, x = screen_size, y = ln_precio)
+graficar_boxplot(df, x = camara_frontal, y = ln_precio)
+graficar_boxplot(df, x = camara_posterior, y = ln_precio)
+
