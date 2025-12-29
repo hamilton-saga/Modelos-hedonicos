@@ -1,0 +1,969 @@
+# ===========================================================================
+# MODELO HEDÓNICO PARA ASPIRADORAS
+# Metodología | Basado en buenas prácticas del BLS y Eurostat
+# Analista: Arnold Jefferson Sanchez Garagate
+# Fecha: 01-10-2025
+# Producto: Aspiradoras
+# Período base: Enero - Junio 2025
+# ===========================================================================
+
+# --- LIBRERÍAS NECESARIAS ---
+library(tidyverse)  # Manipulación de datos
+library(caret)
+library(readxl)     # Leer Excel
+library(dplyr)
+library(sandwich)   # Errores robustos
+library(broom)
+library(knitr)
+library(car)        # VIF, pruebas estadísticas
+library(ggplot2)
+library(randomForest)
+library(lmtest)   # Para bptest
+library(nortest)  # Para alternativa a shapiro.test en muestras grandes
+library(broom)  #mostrar tabla comparativa
+library(modelsummary)
+library(corrplot)
+
+# --- 1. CARGA DE DATOS ---
+# ===========================================================================
+# CARGA DE DATOS
+# ===========================================================================
+
+df <- read_excel("D:/ASANCHEZ/02_ASANCHEZ_2025/05_Modelos_hedonicos/04_ASPIRADORAS/BD_ASPIRADORAS_REAL_SET_25_PRUEBA_BORRAR.xlsx", sheet = "ASPIRADORAS")%>%
+  mutate(
+    # Convertir variables categóricas a factor
+    tienda = as.factor(tienda),
+    marca = as.factor(marca),
+    tipo_aspiradora = as.factor(tipo_aspiradora),
+    tipo_filtro = as.factor(tipo_filtro),
+    tipo_deposito = as.factor(tipo_deposito),
+    )
+
+# Transformar el precio a ln_precio
+df <- df %>% mutate(ln_precio = log(precio))
+#view(df)
+
+
+
+
+
+
+# ===========================================================================
+# ANÁLISIS GRÁFICO ENTRE VARIABLES Y ln(PRECIO)   -  violin
+#                   (funcion)
+# ===========================================================================
+
+df_vertical_cable$potencia_watts <- as.numeric(as.character(df_vertical_cable$potencia_watts))
+
+graficar_violin_con_box <- function(data, x, y) {
+  # Cargar ggplot2 (asegúrate de tenerlo cargado antes o aquí)
+  if (!require(ggplot2)) stop("Necesitas instalar: install.packages('ggplot2')")
+  
+  # Crear gráfico
+  ggplot(data, aes(x = {{ x }}, y = {{ y }})) +
+    geom_violin(trim = FALSE, alpha = 0.5, fill = "skyblue", color = NA) +
+    geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.8, fill = "white") +
+    geom_jitter(aes(color = {{ x }}), width = 0.2, alpha = 0.6, size = 1) +
+    theme_minimal() +
+    labs(
+      title = paste("Distribución de", deparse(substitute(y)), "por", deparse(substitute(x))),
+      x = deparse(substitute(x)),
+      y = deparse(substitute(y))
+    ) +
+    guides(color = "none") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      plot.title = element_text(size = 12)
+    )
+}
+
+graficar_violin_con_box(df, x = tienda, y = ln_precio)
+graficar_violin_con_box(df, x = tipo_aspiradora, y = ln_precio)
+graficar_violin_con_box(df_profesionales, x = marca, y = precio)
+graficar_violin_con_box(df_vertical_cable, x = regulador_potencia, y = ln_precio)
+graficar_violin_con_box(df_vertical_cable, x = potencia_watts, y = ln_precio)
+graficar_violin_con_box(df_vertical_cable, x = filtro_hepa, y = ln_precio)
+graficar_violin_con_box(df_robot, x = sistema_operativo, y = ln_precio)
+graficar_violin_con_box(df_robot, x = definicion_pantalla, y = ln_precio)
+
+
+
+# ===========================================================================
+# ANÁLISIS GRÁFICO ENTRE VARIABLES Y ln(PRECIO)   -  box plot
+#                   (funcion)
+# ===========================================================================
+
+graficar_boxplot <- function(data, x, y) {
+  if (!require(ggplot2)) stop("Necesitas instalar: install.packages('ggplot2')")
+  
+  ggplot(data, aes(x = factor({{ x }}), y = {{ y }}, fill = factor({{ x }}))) +
+    geom_boxplot(alpha = 0.7, outlier.color = "red", outlier.size = 1.5) +
+    theme_minimal() +
+    labs(
+      title = paste("Distribución de", deparse(substitute(y)), "por", deparse(substitute(x))),
+      x = deparse(substitute(x)),
+      y = deparse(substitute(y))
+    ) +
+    guides(fill = "none") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      plot.title = element_text(size = 12)
+    )
+}
+
+graficar_boxplot(df_profesionales, x = capacidad_total_litros, y = ln_precio)
+graficar_boxplot(df_profesionales, x = radio_accion, y = ln_precio)
+graficar_boxplot(df_profesionales, x = potencia_watts, y = ln_precio)
+graficar_boxplot(df_profesionales, x = filtro_hepa, y = ln_precio)
+graficar_boxplot(df_profesionales, x = ruido_decibelio, y = ln_precio)
+graficar_boxplot(df_robot, x = autonomia, y = ln_precio)
+
+
+#ASPIRADORAS ROBOT
+#---------------------------------------------------------------------------
+# ===========================================================================#
+# ANÁLISIS DE RELACIÓN ENTRE VARIABLES Y ln(PRECIO) -- ROBOT
+# Detecta forma funcional recomendada: lineal, cuadrática, log, etc.
+# ===========================================================================#
+
+# Modelo 1: ROBOT
+df_robot <- df %>%
+  filter(tipo_aspiradora == "ROBOT")
+
+# Gráfico CAPACIDAD_TOTAL vs ln_precio para robot
+ggplot(df_robot, aes(x = capacidad_total_litros, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: capacidad vs ln(Precio)",
+       x = "Capacidad (L)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea roja muestra una tendencia clara y estable. la relación es positiva y creciente; a mayor CAPACIDAD (L), mayor precio. FORMA CONCAVA: efecto marginal decreciente, la curva sube, pero se aplana un poco al final.
+
+# Gráfico AUTONOMIA vs ln_precio para robot
+ggplot(df_robot, aes(x = autonomia, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: autonomia vs ln(Precio)",
+       x = "Autonomia (minutos)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea roja muestra una tendencia clara y estable. la relación es positiva y creciente; a mayor ALMACENAMIENTO, mayor precio. FORMA CONCAVA: efecto marginal decreciente, la curva sube, pero se aplana un poco al final, indica que de 256 a 512 añade mucho valor; pasar de 512 a 1000 añade menos valor adicional. confirma para usar: almacenamiento+I(almacenamiento^2)
+
+# Gráfico air_watts vs ln_precio para integrada
+ggplot(df_robot, aes(x = air_watts, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: Potencia real de succión vs ln(Precio)",
+       x = "potencia real de succion (AW)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea es no lineal, la linea roja muestra una tendencia clara y estable. De 14 a 15.6 precio baja (mercado saturado), de 15,6 a 18 precio sube (modelos premium, gaming y alta resolucion). confirma para usar: tamanio_pantalla+I(tamanio_pantalla^2)
+
+# Gráfico presion_pa vs ln_precio para integrada
+ggplot(df_robot, aes(x = presion_pa, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: Presion de succión de succión vs ln(Precio)",
+       x = "Presion de succion (Pa)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea es no lineal, la linea roja muestra no se muestra estable. Confirma para usar: presion_pa+I(presion_pa^2)
+
+# Gráfico tiempo_carga vs ln_precio para integrada
+ggplot(df_robot, aes(x = tiempo_carga, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: Tiempo de carga vs ln(Precio)",
+       x = "Tiempo de carga (Horas)", y = "ln(Precio)") +
+  theme_minimal()
+
+
+# Gráfico tiempo_carga vs ln_precio para integrada
+ggplot(df_robot, aes(x = tiempo_carga, y = ln_precio)) +
+  geom_point(alpha = 0.3, color = "gray50") +
+    # Lineal
+  stat_smooth(method = "lm", formula = y ~ x, color = "red", se = FALSE) +
+    # Cuadrático
+  stat_smooth(method = "lm", formula = y ~ I(x^2), color = "green", se = FALSE) +
+    # Logarítmico (x)
+  stat_smooth(method = "lm", formula = y ~ log(x), color = "purple", se = FALSE) +
+    # Polinómico de grado 3
+  stat_smooth(method = "lm", formula = y ~ poly(x, 3, raw = TRUE), color = "orange", se = FALSE) +
+  
+  labs(
+    title = "Comparación de formas funcionales entre tiempo de carga y ln(precio)",
+    subtitle = "Rojo: lineal | Verde: cuadrática | Púrpura: log(x) | Naranja: polinómica (grado 3)",
+    x = "Tiempo de carga (horas)",
+    y = "ln(Precio)"
+  ) +
+  theme_minimal()
+
+#interpretación: se selecciona la grafica con mejor se ajusta a la nube de puntos, o su relacion a ellos. en este caso.
+
+
+# ===========================================================================#
+# CRITERIO DE INFORMACION DE AKAIKE - AIC
+# Calidad del modelo considerando su ajuste y complejidad 
+# ===========================================================================#
+
+m_lineal <- lm(ln_precio ~ tiempo_carga, data = df_robot)
+m_cuadratico <- lm(ln_precio ~ tiempo_carga + I(tiempo_carga^2), data = df_robot)
+m_log <- lm(ln_precio ~ log(tiempo_carga), data = df_robot)
+m_poly3 <- lm(ln_precio ~ poly(tiempo_carga, 3, raw = TRUE), data = df_robot)
+
+AIC(m_lineal, m_cuadratico, m_log, m_poly3)
+
+# Se selecciona el modelo con menor equilibrio entre ajuste y complejidad.
+#Akaike Information Criterion mide un equilibrio entre: que tan bien se ajusta el modelo a los datos (bondad e ajuste) y cuantos parámetros usa (penaliza la complejidad).
+
+# ===========================================================================#
+# GRAFICOS DE CAJA PARA LAS ASPIRADORAS ROBOT
+# ===========================================================================#
+
+# Gráfico de caja: filtro_hepa vs ln_precio para robot
+ggplot(df_robot, aes(x = factor(filtro_hepa), y = ln_precio)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.5) +
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red") +
+  labs(x = "filtro tipo hepa (0 = No, 1 = Sí)", y = "ln(Precio)",
+       title = "Diferencia de precios por tener filtro hepa") +
+  theme_minimal()
+
+# Gráfico de caja: app_movil vs ln_precio para robot
+ggplot(df_robot, aes(x = factor(app_movil), y = ln_precio)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.5) +
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red") +
+  labs(x = "App móvil (0 = No, 1 = Sí)", y = "ln(Precio)",
+       title = "Diferencia de precios por función de app móvil") +
+  theme_minimal()
+
+
+# Gráfico de caja: control_remoto vs ln_precio para integrada
+ggplot(df_robot, aes(x = factor(control_remoto), y = ln_precio)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.5) +
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red") +
+  labs(x = "Contro remoto (0 = No, 1 = Sí)", y = "ln(Precio)",
+       title = "Diferencia de precios contenencia de control remoto") +
+  theme_minimal()
+
+
+# ESTADÍSTICA: comparar entre diferentes tipos de modelos
+summary(lm(ln_precio ~ filtro_hepa, data = df_robot))
+
+m2 <- lm(ln_precio ~ app_movil + control_remoto, data = df_robot)
+summary(m2)
+
+summary(lm(ln_precio ~ app_movil * control_remoto, data = df_robot))
+
+
+# ===========================================================================#
+# MODELO ECONOMETRICO DE ASPIRADORAS - ROBOT
+# modelo hedónico por Mínimos Cuadrados Ordinarios (MCO)     
+# ===========================================================================#
+
+
+df_robot$capacidad_total_litros <- as.numeric(as.character(df_robot$capacidad_total_litros))
+df_robot$air_watts <- as.numeric(as.character(df_robot$air_watts))
+df_robot$presion_pa <- as.numeric(as.character(df_robot$presion_pa))
+df_robot$tiempo_carga <- as.numeric(as.character(df_robot$tiempo_carga))
+df_robot$autonomia <- as.numeric(as.character(df_robot$autonomia))
+
+# --- 1. Estimar modelos ---
+
+# Modelo 1: Lineal
+
+model_a1 <- lm(
+  ln_precio ~ 
+    capacidad_total_litros +
+    #poly(autonomia,2,raw=TRUE) +
+    air_watts +
+    presion_pa + 
+    tiempo_carga +
+    app_movil +
+    marca,
+  data = df_robot
+)
+
+summary(model_a1)
+
+# --- COMPARATIVO: Extraer resultados ---
+tabla <- modelsummary(
+  list("Lineal" = model_b1, "transformaciones" = model_b2),
+  gof_omit = "F|Log",
+  estimate = "{estimate} ({std.error})",
+  statistic = NULL,
+  stars = TRUE,
+  notes = c("Errores estándar entre paréntesis.",
+            "Significancia: *** p<0.01, ** p<0.05, * p<0.1")
+)
+
+# Mostrar tabla
+print(tabla)
+
+# 5. Diagnósticos del modelo ------------------------------------------------#
+
+# Resumen del modelo (coeficientes, significancia, R²)
+summary(model_a1)
+
+# Factor de Inflación de Varianza (VIF) - detecta multicolinealidad
+vif_values <- vif(model_a1)
+print("🔍 FACTOR DE INFLACIÓN DE VARIANZA (VIF)")
+print(vif_values)
+# ⚠️ Advertencia si VIF > 5 o 10
+
+# Prueba de heterocedasticidad: Breusch-Pagan
+bp_test <- bptest(model_a1)
+print("🔍 PRUEBA DE BREUSCH-PAGAN (heterocedasticidad)")
+print(bp_test)
+# Si p < 0.05 → hay heterocedasticidad
+
+# Coeficientes con errores estándar robustos (recomendado para IPC)
+cat("\n📊 COEFICIENTES CON ERRORES ROBUSTOS (HC3)\n")
+coeftest(model_a1, vcov = vcovHC(model_a1, type = "HC3"))
+
+
+# Prueba de White (alternativa, útil si hay muchos regresores)
+white_test <- ncvTest(model_a1)
+print("🔍 PRUEBA DE WHITE (no linealidad en varianza)")
+print(white_test)
+
+
+cor(df_sin_bolsa[, c("capacidad_total_litros", "potencia_watts")])
+
+
+#-----------------------------------------------------------------------#
+# Paso 1. Verifica observaciones influyentes
+influencePlot(model_a1)  # paquete car
+
+#Paso 2. Revisa la distribución de los fitted values
+hist(fitted(model_a1))
+
+#Paso 3. Analiza los residuos estandarizados
+hist(rstandard(model_a1))
+
+
+library(ggplot2)
+
+ggplot(data.frame(
+  fitted = fitted(model_a1),
+  resid = rstandard(model_a1)
+), aes(fitted, resid)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "red") +
+  theme_minimal() +
+  labs(title = "Residuos estandarizados vs valores ajustados")
+#------------------------------------------------------------------------#
+
+# 6. Análisis gráfico de residuos -------------------------------------------#
+# Deben cumplirse supuestos clásicos
+
+par(mfrow = c(2, 2))
+plot(model_a1)
+par(mfrow = c(1, 1))
+
+# Interpretación:
+# - Gráfico 1 (Residuals vs Fitted): sin patrón curvilíneo → ok
+# - Gráfico 2 (QQ Plot): puntos cerca de la línea → normalidad aceptable
+# - Gráfico 3 (Scale-Location): dispersión constante → homocedasticidad
+# - Gráfico 4 (Cook's D): puntos con influencia alta (> 0.5) deben revisarse
+
+#--------------------------------------------------------------------------
+
+#ASPIRADORAS DE ARRASTRE CON DEPOSITO DE BOLSA
+
+# ===========================================================================#
+# ANÁLISIS DE RELACIÓN ENTRE VARIABLES Y ln(PRECIO) - CON BOLSA
+# Detecta forma funcional recomendada: lineal, cuadrática, log, etc.
+# ===========================================================================#
+
+# Modelo 2: DE ARRASTRE CON BOLSA
+df_bolsa <- df %>%
+  filter(tipo_aspiradora == "DE ARRASTRE CON BOLSA")
+#convertir a númerico
+df_bolsa$potencia_watts <- as.numeric(df_bolsa$potencia_watts)
+df_bolsa$radio_accion <- as.numeric(df_bolsa$radio_accion)
+
+
+# Gráfico CAPACIDAD_TOTAL vs ln_precio para robot
+ggplot(df_bolsa, aes(x = capacidad_total_litros, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: capacidad vs ln(Precio)",
+       x = "Capacidad (L)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea roja muestra una tendencia clara y estable. la relación es positiva y creciente; a mayor CAPACIDAD (L), mayor precio. FORMA CONCAVA: efecto marginal decreciente, la curva sube, pero se aplana un poco al final.
+
+
+
+# Gráfico radio_accion vs ln_precio para integrada
+ggplot(df_bolsa, aes(x = radio_accion, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: Potencia real de succión vs ln(Precio)",
+       x = "potencia real de succion (AW)", y = "ln(Precio)") +
+  theme_minimal()
+
+
+# Gráfico potencia_watts vs ln_precio para integrada
+ggplot(df_bolsa, aes(x = potencia_watts, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: Potencia real de succión vs ln(Precio)",
+       x = "potencia real de succion (AW)", y = "ln(Precio)") +
+  theme_minimal()
+
+
+# Gráfico general para buscar la relacion de variables
+ggplot(df_bolsa, aes(x = radio_accion, y = ln_precio)) +
+  geom_point(alpha = 0.3, color = "gray50") +
+  
+  # Lineal
+  stat_smooth(method = "lm", formula = y ~ x, color = "red", se = FALSE) +
+  
+  # Cuadrático
+  stat_smooth(method = "lm", formula = y ~ I(x^2), color = "green", se = FALSE) +
+  
+  # Logarítmico (x)
+  stat_smooth(method = "lm", formula = y ~ log(x), color = "purple", se = FALSE) +
+  
+  # Polinómico de grado 3
+  stat_smooth(method = "lm", formula = y ~ poly(x, 3, raw = TRUE), color = "orange", se = FALSE) +
+  
+  labs(
+    title = "Comparación de formas funcionales entre tiempo de carga y ln(precio)",
+    subtitle = "Rojo: lineal | Verde: cuadrática | Púrpura: log(x) | Naranja: polinómica (grado 3)",
+    x = "Tiempo de carga (horas)",
+    y = "ln(Precio)"
+  ) +
+  theme_minimal()
+
+#interpretación: se selecciona la grafica con mejor se ajusta a la nube de puntos, o su relacion a ellos. en este caso.
+
+# ESTADÍSTICA: comparar entre diferentes tipos de modelos
+# Criterio de información AIC
+m_lineal <- lm(ln_precio ~ capacidad_total_litros, data = df_bolsa)
+m_cuadratico <- lm(ln_precio ~ capacidad_total_litros + I(capacidad_total_litros^2), data = df_bolsa)
+m_log <- lm(ln_precio ~ log(capacidad_total_litros), data = df_bolsa)
+m_poly3 <- lm(ln_precio ~ poly(capacidad_total_litros, 3, raw = TRUE), data = df_bolsa)
+
+AIC(m_lineal, m_cuadratico, m_log, m_poly3)
+
+
+# Se selecciona el modelo con menor equilibrio entre ajuste y complejidad.
+#Akaike Information Criterion mide un equilibrio entre: que tan bien se ajusta el modelo a los datos (bondad e ajuste) y cuantos parámetros usa (penaliza la complejidad).
+
+# Gráfico de caja: filtro_hepa vs ln_precio para robot
+ggplot(df_robot, aes(x = factor(filtro_hepa), y = ln_precio)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.5) +
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red") +
+  labs(x = "filtro tipo hepa (0 = No, 1 = Sí)", y = "ln(Precio)",
+       title = "Diferencia de precios por tener filtro hepa") +
+  theme_minimal()
+
+# Gráfico de caja: app_movil vs ln_precio para robot
+ggplot(df_robot, aes(x = factor(app_movil), y = ln_precio)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.5) +
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red") +
+  labs(x = "App móvil (0 = No, 1 = Sí)", y = "ln(Precio)",
+       title = "Diferencia de precios por función de app móvil") +
+  theme_minimal()
+
+
+# Gráfico de caja: control_remoto vs ln_precio para integrada
+ggplot(df_robot, aes(x = factor(control_remoto), y = ln_precio)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.5) +
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red") +
+  labs(x = "Contro remoto (0 = No, 1 = Sí)", y = "ln(Precio)",
+       title = "Diferencia de precios contenencia de control remoto") +
+  theme_minimal()
+
+
+# ESTADÍSTICA: comparar entre diferentes tipos de modelos
+summary(lm(ln_precio ~ filtro_hepa, data = df_robot))
+
+m2 <- lm(ln_precio ~ app_movil + control_remoto, data = df_robot)
+summary(m2)
+
+summary(lm(ln_precio ~ app_movil * control_remoto, data = df_robot))
+
+
+# ===========================================================================#
+# ANÁLISIS DE CORRELACION ENTRE VARIABLES Y ln(PRECIO)
+# ===========================================================================#
+
+# Correlación entre variable y ln_precio 
+cor(df_dedicada$memoria_tarjeta_video, df_dedicada$ln_precio, use = "complete.obs")
+# correlacion de Pearson
+# Si es < 0.2 → probablemente débil
+# Si es > 0.5 → fuerte
+
+# Correlación entre variables númericas relevantes y ln_precio
+  # Seleccionamos solo las variables numéricas relevantes
+vars_numericas <- df_bolsa[, c("capacidad_total_litros", "potencia_watts", 
+                               "air_watts", "presion_pa", "tiempo_carga")]
+
+# Calculamos la matriz de correlaciones
+cor_matrix <- cor(vars_numericas, use = "complete.obs")
+
+# Mostramos con redondeo
+round(cor_matrix, 2)
+
+# Segunda opcion: mostrar matriz de correlación - grafico:
+corrplot(cor_matrix, method = "color", type = "upper", tl.col = "black", tl.cex = 0.8)
+
+# ===========================================================================#
+# ANÁLISIS GRÁFICO ENTRE VARIABLES Y ln(PRECIO)
+#                   (funcion)
+# ===========================================================================#
+
+graficar_violin_con_box <- function(data, x, y) {
+  # Cargar ggplot2 (asegúrate de tenerlo cargado antes o aquí)
+  if (!require(ggplot2)) stop("Necesitas instalar: install.packages('ggplot2')")
+  
+  # Crear gráfico
+  ggplot(data, aes(x = {{ x }}, y = {{ y }})) +
+    geom_violin(trim = FALSE, alpha = 0.5, fill = "skyblue", color = NA) +
+    geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.8, fill = "white") +
+    geom_jitter(aes(color = {{ x }}), width = 0.2, alpha = 0.6, size = 1) +
+    theme_minimal() +
+    labs(
+      title = paste("Distribución de", deparse(substitute(y)), "por", deparse(substitute(x))),
+      x = deparse(substitute(x)),
+      y = deparse(substitute(y))
+    ) +
+    guides(color = "none") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      plot.title = element_text(size = 12)
+    )
+}
+
+graficar_violin_con_box(df, x = resolucion_pantalla, y = ln_precio)
+graficar_violin_con_box(df_dedicada, x = marca_procesador, y = ln_precio)
+graficar_violin_con_box(df_dedicada, x = sistema_operativvo, y = ln_precio)
+
+# ===========================================================================#
+# MODELO ECONOMETRICO DE ASPIRADORAS - CON BOLSA
+# modelo hedónico por Mínimos Cuadrados Ordinarios (MCO)     
+# ===========================================================================#
+
+# --- 1. Estimar modelos ---
+
+# Modelo 1: Lineal
+df_bolsa$capacidad_total_litros <- as.numeric(as.character(df_bolsa$capacidad_total_litros))
+df_bolsa$radio_accion <- as.numeric(as.character(df_bolsa$radio_accion))
+df_bolsa$potencia_watts <- as.numeric(as.character(df_bolsa$potencia_watts))
+
+model_b2 <- lm(
+  ln_precio ~ 
+    log(capacidad_total_litros) + 
+    poly(radio_accion, 2, raw = TRUE) +
+    poly(potencia_watts, 2, raw = TRUE) +
+    filtro_hepa + 
+    marca,
+  data = df_bolsa
+)
+
+summary(model_b2)
+
+# 5. Diagnósticos del modelo ------------------------------------------------#
+
+# Resumen del modelo (coeficientes, significancia, R²)
+summary(model_b2)
+
+# Factor de Inflación de Varianza (VIF) - detecta multicolinealidad
+vif_values <- vif(model_b2)
+print("🔍 FACTOR DE INFLACIÓN DE VARIANZA (VIF)")
+print(vif_values)
+# ⚠️ Advertencia si VIF > 5 o 10
+
+# Prueba de heterocedasticidad: Breusch-Pagan
+bp_test <- bptest(model_b2)
+print("🔍 PRUEBA DE BREUSCH-PAGAN (heterocedasticidad)")
+print(bp_test)
+# Si p < 0.05 → hay heterocedasticidad
+
+# Coeficientes con errores estándar robustos (recomendado para IPC)
+cat("\n📊 COEFICIENTES CON ERRORES ROBUSTOS (HC3)\n")
+coeftest(model_b2, vcov = vcovHC(model_b2, type = "HC3"))
+
+# Prueba de White (alternativa, útil si hay muchos regresores)
+white_test <- ncvTest(model_b2)
+print("🔍 PRUEBA DE WHITE (no linealidad en varianza)")
+print(white_test)
+
+
+# Paso 1. Verifica observaciones influyentes
+influencePlot(model_b2)  # paquete car
+
+#Paso 2. Revisa la distribución de los fitted values
+hist(fitted(model_b2))
+
+#Paso 3. Analiza los residuos estandarizados
+hist(rstandard(model_b2))
+
+
+library(ggplot2)
+
+ggplot(data.frame(
+  fitted = fitted(model_b2),
+  resid = rstandard(model_b2)
+), aes(fitted, resid)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "red") +
+  theme_minimal() +
+  labs(title = "Residuos estandarizados vs valores ajustados")
+
+
+# 6. Análisis gráfico de residuos -------------------------------------------#
+# Deben cumplirse supuestos clásicos
+
+par(mfrow = c(2, 2))
+plot(model_b2)
+par(mfrow = c(1, 1))
+
+# Interpretación:
+# - Gráfico 1 (Residuals vs Fitted): sin patrón curvilíneo → ok
+# - Gráfico 2 (QQ Plot): puntos cerca de la línea → normalidad aceptable
+# - Gráfico 3 (Scale-Location): dispersión constante → homocedasticidad
+# - Gráfico 4 (Cook's D): puntos con influencia alta (> 0.5) deben revisarse
+
+
+
+#ASPIRADORAS VERTICALES TIPO ESCOBA CON CABLE
+
+
+#ASPIRADORAS TIPO ESCOBA CON CABLE
+
+
+#VERTICAL TIPO ESCOBA CON CABLE
+
+#--------------------------------------------------------------------------
+
+# ===========================================================================#
+# MODELO ECONOMETRICO DE ASPIRADORAS - VERTICAL TIPO ESCOBA CON CABLE
+# modelo hedónico por Mínimos Cuadrados Ordinarios (MCO)     
+# ===========================================================================#
+
+# Modelo 2: vertical tipo escoba con cable
+df_vertical_cable <- df %>%
+  filter(tipo_aspiradora == "VERTICAL TIPO ESCOBA CON CABLE")
+
+
+#---------------------------------------------------------------#
+# Gráfico general para buscar la relacion de variables
+ggplot(df_vertical_cable, aes(x = potencia_watts, y = ln_precio)) +
+  geom_point(alpha = 0.3, color = "gray50") +
+  
+  # Lineal
+  stat_smooth(method = "lm", formula = y ~ x, color = "red", se = FALSE) +
+    # Cuadrático
+  stat_smooth(method = "lm", formula = y ~ I(x^2), color = "green", se = FALSE) +
+    # Logarítmico (x)
+  stat_smooth(method = "lm", formula = y ~ log(x), color = "purple", se = FALSE) +
+    # Polinómico de grado 3
+  stat_smooth(method = "lm", formula = y ~ poly(x, 3, raw = TRUE), color = "orange", se = FALSE) +
+  
+  labs(
+    title = "Comparación de formas funcionales entre tiempo de carga y ln(precio)",
+    subtitle = "Rojo: lineal | Verde: cuadrática | Púrpura: log(x) | Naranja: polinómica (grado 3)",
+    x = "Tiempo de carga (horas)",
+    y = "ln(Precio)"
+  ) +
+  theme_minimal()
+#-----------------------------------------------------------------#
+# ESTADÍSTICA: comparar entre diferentes tipos de modelos
+# Criterio de información AIC
+m_lineal <- lm(ln_precio ~ capacidad_total_litros, data = df_sin_bolsa)
+m_cuadratico <- lm(ln_precio ~ capacidad_total_litros + I(capacidad_total_litros^2), data = df_sin_bolsa)
+m_log <- lm(ln_precio ~ log(capacidad_total_litros), data = df_sin_bolsa)
+m_poly3 <- lm(ln_precio ~ poly(capacidad_total_litros, 3, raw = TRUE), data = df_sin_bolsa)
+
+AIC(m_lineal, m_cuadratico, m_log, m_poly3)
+#-----------------------------------------------------------------#
+
+# --- 1. Estimar modelos ---
+
+df_vertical_cable$potencia_watts <- as.numeric(as.character(df_vertical_cable$potencia_watts))
+df_vertical_cable$capacidad_total_litros <- as.numeric(as.character(df_vertical_cable$capacidad_total_litros))
+df_vertical_cable$radio_accion <- as.numeric(as.character(df_vertical_cable$radio_accion))
+df_vertical_cable$presion_pa <- as.numeric(as.character(df_vertical_cable$presion_pa))
+# Modelo 1: Lineal
+#Obtener la media por marca
+#aggregate(precio ~ marca, data = df_sin_bolsa, mean)
+#Poner como base a una marca representativa en el modelo
+df_vertical_cable$marca <- relevel(df_vertical_cable$marca, ref = "KARCHER")
+
+model_c1 <- lm(
+  ln_precio ~ 
+    #poly(capacidad_total_litros,2,raw = TRUE) +
+    #log(capacidad_total_litros) +
+    poly(capacidad_total_litros,2,raw=TRUE) +
+    #capacidad_total_litros + 
+    #radio_accion +
+    poly(potencia_watts,2,raw=TRUE) +
+    #potencia_watts +
+    regulador_potencia +
+    #filtro_hepa +
+    #log(presion_pa) + 
+    marca,
+  data = df_vertical_cable
+)
+
+summary(model_c1)
+
+# --- COMPARATIVO: Extraer resultados ---
+tabla <- modelsummary(
+  list("Lineal" = model_b1, "transformaciones" = model_b2),
+  gof_omit = "F|Log",
+  estimate = "{estimate} ({std.error})",
+  statistic = NULL,
+  stars = TRUE,
+  notes = c("Errores estándar entre paréntesis.",
+            "Significancia: *** p<0.01, ** p<0.05, * p<0.1")
+)
+
+# Mostrar tabla
+print(tabla)
+
+# 5. Diagnósticos del modelo ------------------------------------------------#
+
+# Resumen del modelo (coeficientes, significancia, R²)
+summary(model_c1)
+
+# Factor de Inflación de Varianza (VIF) - detecta multicolinealidad
+vif_values <- vif(model_c1)
+print("🔍 FACTOR DE INFLACIÓN DE VARIANZA (VIF)")
+print(vif_values)
+# ⚠️ Advertencia si VIF > 5 o 10
+
+# Prueba de heterocedasticidad: Breusch-Pagan
+bp_test <- bptest(model_c1)
+print("🔍 PRUEBA DE BREUSCH-PAGAN (heterocedasticidad)")
+print(bp_test)
+# Si p < 0.05 → hay heterocedasticidad
+
+# Coeficientes con errores estándar robustos (recomendado para IPC)
+cat("\n📊 COEFICIENTES CON ERRORES ROBUSTOS (HC3)\n")
+coeftest(model_c1, vcov = vcovHC(model_c1, type = "HC3"))
+
+
+# Prueba de White (alternativa, útil si hay muchos regresores)
+white_test <- ncvTest(model_c1)
+print("🔍 PRUEBA DE WHITE (no linealidad en varianza)")
+print(white_test)
+
+
+cor(df_sin_bolsa[, c("capacidad_total_litros", "potencia_watts")])
+
+
+#-----------------------------------------------------------------------#
+# Paso 1. Verifica observaciones influyentes
+influencePlot(model_c1)  # paquete car
+
+#Paso 2. Revisa la distribución de los fitted values
+hist(fitted(model_b2))
+
+#Paso 3. Analiza los residuos estandarizados
+hist(rstandard(model_b2))
+
+
+library(ggplot2)
+
+ggplot(data.frame(
+  fitted = fitted(model_b2),
+  resid = rstandard(model_b2)
+), aes(fitted, resid)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "red") +
+  theme_minimal() +
+  labs(title = "Residuos estandarizados vs valores ajustados")
+#------------------------------------------------------------------------#
+
+# 6. Análisis gráfico de residuos -------------------------------------------#
+# Deben cumplirse supuestos clásicos
+
+par(mfrow = c(2, 2))
+plot(model_c1)
+par(mfrow = c(1, 1))
+
+# Interpretación:
+# - Gráfico 1 (Residuals vs Fitted): sin patrón curvilíneo → ok
+# - Gráfico 2 (QQ Plot): puntos cerca de la línea → normalidad aceptable
+# - Gráfico 3 (Scale-Location): dispersión constante → homocedasticidad
+# - Gráfico 4 (Cook's D): puntos con influencia alta (> 0.5) deben revisarse
+
+
+#ASPIRADORAS PROFESIONALES - SECO/HUMEDO
+
+#--------------------------------------------------------------------------
+
+# ===========================================================================#
+# MODELO ECONOMETRICO DE ASPIRADORAS - PROFESIONALES - SECO/HUMEDO
+# modelo hedónico por Mínimos Cuadrados Ordinarios (MCO)     
+# ===========================================================================#
+
+# Modelo 2: PROFESIONALES - SECO/HUMEDO
+df_profesionales <- df %>%
+  filter(tipo_aspiradora == "PROFESIONAL SECO/HUMEDO BARRIL")
+
+df_profesionales$radio_accion <- as.numeric(as.character(df_profesionales$radio_accion))
+#---------------------------------------------------------------#
+# Gráfico general para buscar la relacion de variables
+ggplot(df_profesionales, aes(x = capacidad_total_litros, y = ln_precio)) +
+  geom_point(alpha = 0.3, color = "gray50") +
+  
+  # Lineal
+  stat_smooth(method = "lm", formula = y ~ x, color = "red", se = FALSE) +
+  # Cuadrático
+  stat_smooth(method = "lm", formula = y ~ I(x^2), color = "green", se = FALSE) +
+  # Logarítmico (x)
+  stat_smooth(method = "lm", formula = y ~ log(x), color = "purple", se = FALSE) +
+  # Polinómico de grado 3
+  stat_smooth(method = "lm", formula = y ~ poly(x, 3, raw = TRUE), color = "orange", se = FALSE) +
+  
+  labs(
+    title = "Comparación de formas funcionales entre tiempo de carga y ln(precio)",
+    subtitle = "Rojo: lineal | Verde: cuadrática | Púrpura: log(x) | Naranja: polinómica (grado 3)",
+    x = "Tiempo de carga (horas)",
+    y = "ln(Precio)"
+  ) +
+  theme_minimal()
+#-----------------------------------------------------------------#
+# ESTADÍSTICA: comparar entre diferentes tipos de modelos
+# Criterio de información AIC
+m_lineal <- lm(ln_precio ~ capacidad_total_litros, data = df_profesionales)
+m_cuadratico <- lm(ln_precio ~ capacidad_total_litros + I(capacidad_total_litros^2), data = df_profesionales)
+m_log <- lm(ln_precio ~ log(capacidad_total_litros), data = df_profesionales)
+m_poly3 <- lm(ln_precio ~ poly(capacidad_total_litros, 3, raw = TRUE), data = df_profesionales)
+
+AIC(m_lineal, m_cuadratico, m_log, m_poly3)
+#-----------------------------------------------------------------#
+
+# --- 1. Estimar modelos ---
+df_profesionales$capacidad_total_litros <- as.numeric(as.character(df_profesionales$capacidad_total_litros))
+df_profesionales$potencia_watts <- as.numeric(as.character(df_profesionales$potencia_watts))
+df_profesionales$radio_accion <- as.numeric(as.character(df_profesionales$radio_accion))
+
+
+# Modelo 1: Lineal
+
+#Obtener la media por marca
+aggregate(precio ~ marca, data = df_profesionales, mean)
+#Poner como base a una marca representativa en el modelo
+df_profesionales$marca <- relevel(df_profesionales$marca, ref = "ELECTROLUX")
+
+
+model_d1 <- lm(
+  ln_precio ~ 
+    capacidad_total_litros +
+    radio_accion +
+    poly(potencia_watts,2,raw=TRUE) +
+    filtro_hepa +
+    marca,
+  data = df_profesionales
+)
+
+summary(model_d1)
+
+# 5. Diagnósticos del modelo ------------------------------------------------#
+
+# Resumen del modelo (coeficientes, significancia, R²)
+summary(model_c2)
+
+# Factor de Inflación de Varianza (VIF) - detecta multicolinealidad
+vif_values <- vif(model_d1)
+print("🔍 FACTOR DE INFLACIÓN DE VARIANZA (VIF)")
+print(vif_values)
+# ⚠️ Advertencia si VIF > 5 o 10
+
+# Prueba de heterocedasticidad: Breusch-Pagan
+bp_test <- bptest(model_d1)
+print("🔍 PRUEBA DE BREUSCH-PAGAN (heterocedasticidad)")
+print(bp_test)
+# Si p < 0.05 → hay heterocedasticidad
+
+# Coeficientes con errores estándar robustos (recomendado para IPC)
+cat("\n📊 COEFICIENTES CON ERRORES ROBUSTOS (HC3)\n")
+coeftest(model_d1, vcov = vcovHC(model_d1, type = "HC3"))
+
+
+# Prueba de White (alternativa, útil si hay muchos regresores)
+white_test <- ncvTest(model_d1)
+print("🔍 PRUEBA DE WHITE (no linealidad en varianza)")
+print(white_test)
+
+
+#cor(df_sin_bolsa[, c("capacidad_total_litros", "potencia_watts")])
+
+
+#-----------------------------------------------------------------------#
+# Paso 1. Verifica observaciones influyentes
+influencePlot(model_d1)  # paquete car
+
+#Paso 2. Revisa la distribución de los fitted values
+hist(fitted(model_d1))
+
+#Paso 3. Analiza los residuos estandarizados
+hist(rstandard(model_d1))
+
+
+library(ggplot2)
+
+ggplot(data.frame(
+  fitted = fitted(model_d1),
+  resid = rstandard(model_d1)
+), aes(fitted, resid)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "red") +
+  theme_minimal() +
+  labs(title = "Residuos estandarizados vs valores ajustados")
+#------------------------------------------------------------------------#
+
+# 6. Análisis gráfico de residuos -------------------------------------------#
+# Deben cumplirse supuestos clásicos
+
+par(mfrow = c(2, 2))
+plot(model_d1)
+par(mfrow = c(1, 1))
+
+# Interpretación:
+# - Gráfico 1 (Residuals vs Fitted): sin patrón curvilíneo → ok
+# - Gráfico 2 (QQ Plot): puntos cerca de la línea → normalidad aceptable
+# - Gráfico 3 (Scale-Location): dispersión constante → homocedasticidad
+# - Gráfico 4 (Cook's D): puntos con influencia alta (> 0.5) deben revisarse
+
+#--------------------------------------------------------------------------
+#TABLA DE COMPARATIVO FINAL
+#--------------------------------------------------------------------------
+
+summary(model_b2)
+
+vcov_list <- list(
+  "Profesionales" = vcovHC(model_d1, type = "HC3"),
+  "Robots" = vcovHC(model_a1, type = "HC1"),
+  "Arrastre con bolsa" = vcovHC(model_b2, type = "HC1"),
+  "Vertical con cable" = vcovHC(model_c1, type = "HC1")
+)
+
+tabla <- modelsummary(
+  list(
+    "Profesionales" = model_d1,
+    "Robots" = model_a1,
+    "Arrastre con bolsa" = model_b2,
+    "Arrastre sin bolsa" = model_c1
+  ),
+  vcov = vcov_list,             # Usa errores robustos correctos
+  gof_omit = "F|Log|AIC|BIC",
+  estimate = "{estimate} ({std.error})",
+  statistic = NULL,
+  stars = TRUE,
+  notes = c(
+    "Errores estándar robustos (HC1) entre paréntesis.",
+    "Significancia: *** p<0.01, ** p<0.05, * p<0.1"
+  ),
+  
+  output = "resultados_modelos.xlsx"
+)
+
