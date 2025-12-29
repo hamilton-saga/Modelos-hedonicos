@@ -1,0 +1,764 @@
+# ===========================================================================
+# MODELO HEDÓNICO PARA LAPTOP
+# Metodología | Basado en buenas prácticas del BLS y Eurostat
+# Analista: Arnold Jefferson Sanchez Garagate
+# Fecha: 18-09-2025
+# Producto: Laptops
+# Período base: Enero - Junio 2025
+# ===========================================================================
+
+# --- LIBRERÍAS NECESARIAS ---
+library(tidyverse)  # Manipulación de datos
+library(caret)
+library(readxl)     # Leer Excel
+library(dplyr)
+library(sandwich)   # Errores robustos
+library(broom)
+library(knitr)
+library(car)        # VIF, pruebas estadísticas
+library(ggplot2)
+library(randomForest)
+library(lmtest)   # Para bptest
+library(nortest)  # Para alternativa a shapiro.test en muestras grandes
+library(broom)  #mostrar tabla comparativa
+library(modelsummary)
+library(stargazer)
+library(broom)
+library(writexl)
+library(psych)
+
+#bd_laptop_hedonicos_set_25 <- read_excel("D:/ASANCHEZ/02_ASANCHEZ_2025/05_Modelos_hedonicos/01_LAPTOP/bd_laptop_hedonicos_set_25.xlsx", 
+#                                         sheet = "bd_modelo_cuartiles")
+
+#df <- read_excel("D:/ASANCHEZ/02_ASANCHEZ_2025/05_Modelos_hedonicos/01_LAPTOP/bd_laptop_hedonicos_set_25.xlsx")
+
+
+# --- 1. CARGA DE DATOS ---
+df <- read_excel("D:/ASANCHEZ/02_ASANCHEZ_2025/05_Modelos_hedonicos/01_LAPTOP/bd_laptop_hedonicos_set_25.xlsx", 
+                                                          sheet = "bd_modelo_cuartiles_2")%>%
+mutate(
+  # Convertir variables categóricas a factor
+  tienda = as.factor(tienda),
+  marca = as.factor(marca),
+  marca_procesador = as.factor(marca_procesador),
+  nombre_procesador = as.factor(nombre_procesador),
+  generacion_procesador = as.factor(generacion_procesador),
+  sistema_operativo = as.factor(sistema_operativo),
+  tarjeta_video_tipo = as.factor(tarjeta_video_tipo),
+  definicion_pantalla = as.factor(definicion_pantalla),
+  resolucion_pantalla = as.factor(resolucion_pantalla)
+)
+
+
+library(rpart)
+tree <- rpart(ln_precio ~ ., data=df)
+plot(tree); text(tree)
+
+
+
+
+# Transformar el precio a ln_precio
+df <- df %>% mutate(ln_precio = log(mediana))
+#view(df)
+# ===========================================================================
+# ANÁLISIS DE RELACIÓN ENTRE VARIABLES Y ln(PRECIO)
+# Detecta forma funcional recomendada: lineal, cuadrática, log, etc.
+# ===========================================================================
+
+#Crea un diagrama de cajas agrupado
+df_dedicada$memoria_tarjeta_video <- as.numeric(as.character(df_dedicada$memoria_tarjeta_video))
+
+#++++++++++++++++++++++++++++++++++++++++++++++++
+# Modelo 1: Tarjeta Integrada
+df_integrada <- df %>%
+  filter(tarjeta_tipo_video == 0)
+
+# Función simple para boxplot
+mi_boxplot <- function(data, y, x) {
+  boxplot(data[[y]] ~ data[[x]],
+          main = paste("Boxplot de", y, "por", x),
+          xlab = x,
+          ylab = y)
+}
+
+mi_boxplot(df_integrada, "ln_precio", "marca")
+mi_boxplot(df_integrada, "ln_precio", "marca_procesador")
+mi_boxplot(df_integrada, "ln_precio", "mes")
+mi_boxplot(df_integrada, "ln_precio", "tienda")
+mi_boxplot(df_integrada, "ln_precio", "nombre_procesador")
+mi_boxplot(df_integrada, "ln_precio", "sistema_operativo")
+mi_boxplot(df_integrada, "ln_precio", "benchmark")
+mi_boxplot(df_integrada, "ln_precio", "memoria_ram")
+mi_boxplot(df_integrada, "ln_precio", "almacenamiento")
+mi_boxplot(df_integrada, "ln_precio", "memoria_tarjeta_video")
+
+#++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+#++++++++++++++++++++++++++++++++++++++++++++++++
+# Modelo 1: Tarjeta Dedicada
+df_dedicada <- df %>%
+  filter(tarjeta_tipo_video == 1)
+
+# Función simple para boxplot
+dedicada_boxplot <- function(data, y, x) {
+  boxplot(data[[y]] ~ data[[x]],
+          main = paste("Boxplot de", y, "por", x),
+          xlab = x,
+          ylab = y)
+}
+
+dedicada_boxplot(df_dedicada, "ln_precio", "marca")
+dedicada_boxplot(df_dedicada, "ln_precio", "marca_procesador")
+dedicada_boxplot(df_dedicada, "ln_precio", "mes")
+dedicada_boxplot(df_dedicada, "ln_precio", "tienda")
+dedicada_boxplot(df_dedicada, "ln_precio", "nombre_procesador")
+dedicada_boxplot(df_dedicada, "ln_precio", "sistema_operativo")
+dedicada_boxplot(df_dedicada, "ln_precio", "benchmark")
+dedicada_boxplot(df_dedicada, "ln_precio", "memoria_ram")
+dedicada_boxplot(df_dedicada, "ln_precio", "almacenamiento")
+dedicada_boxplot(df_dedicada, "ln_precio", "memoria_tarjeta_video")
+
+#++++++++++++++++++++++++++++++++++++++++++++++++
+
+#Rango intercuartilico
+
+ver2 <- df_integrada %>%
+  group_by(modelo_2) %>%
+  summarise(
+    Q1 = quantile(ln_precio, 0.25, na.rm = TRUE),
+    Q3 = quantile(ln_precio, 0.75, na.rm = TRUE),
+    IQR = IQR(ln_precio, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+write_xlsx(ver2, "tabla_iqr_2.xlsx")
+
+
+
+
+
+# Modelo 1: Tarjeta Integrada
+df_integrada <- df %>%
+  filter(tarjeta_tipo_video == 0)
+
+# Gráfico RAM vs ln_precio para integrada
+ggplot(df_integrada, aes(x = memoria_ram, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: RAM vs ln(Precio)",
+       x = "RAM (GB)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea roja muestra una tendencia clara y estable. la relación es positiva y creciente; a mayor RAM, mayor precio. FORMA CONCAVA: efecto marginal decreciente, la curva sube, pero se aplana un poco al final, indica que de 8 a 16 añade mucho valor; pasar de 16 a 32 añade menos valor adicional. confirma para usar: ram+I(ram^2)
+
+# Gráfico ALMACENAMIENTO vs ln_precio para integrada
+ggplot(df_integrada, aes(x = almacenamiento, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: RAM vs ln(Precio)",
+       x = "Almacenamiento (GB)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea roja muestra una tendencia clara y estable. la relación es positiva y creciente; a mayor ALMACENAMIENTO, mayor precio. FORMA CONCAVA: efecto marginal decreciente, la curva sube, pero se aplana un poco al final, indica que de 256 a 512 añade mucho valor; pasar de 512 a 1000 añade menos valor adicional. confirma para usar: almacenamiento+I(almacenamiento^2)
+
+# Gráfico TAMAÑO PANTALLA vs ln_precio para integrada
+ggplot(df_integrada, aes(x = tamanio_pantalla, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: tamaño de pantalla vs ln(Precio)",
+       x = "Tamaño de pantalla (IN)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea es no lineal, la linea roja muestra una tendencia clara y estable. De 14 a 15.6 precio baja (mercado saturado), de 15,6 a 18 precio sube (modelos premium, gaming y alta resolucion). confirma para usar: tamanio_pantalla+I(tamanio_pantalla^2)
+
+
+# ===========================================================================
+# ANÁLISIS DE RELACIÓN ENTRE VARIABLES Y ln(PRECIO)
+# Detecta forma funcional recomendada: lineal, cuadrática, log, etc.
+# ===========================================================================
+
+# Modelo 1: Tarjeta Dedicada
+df_dedicada <- df %>%
+  filter(tarjeta_tipo_video == 1)
+
+# Gráfico RAM vs ln_precio para integrada
+ggplot(df_dedicada, aes(x = benchmark, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: RAM vs ln(Precio)",
+       x = "RAM (GB)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea roja muestra una tendencia clara y estable. la relación es conpleja no lineal en s; a mayor RAM, mayor precio. FORMA CONCAVA: efecto marginal decreciente, la curva sube, pero se aplana un poco al final, indica que de 8 a 16 añade mucho valor; pasar de 16 a 32 añade menos valor adicional. confirma para usar: ram+I(ram^2)
+
+# Gráfico ALMACENAMIENTO vs ln_precio para integrada
+ggplot(df_dedicada, aes(x = almacenamiento, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: ALMACENAMIENTO vs ln(Precio)",
+       x = "Almacenamiento (GB)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea roja muestra una tendencia clara y estable. la relación es positiva y creciente; a mayor ALMACENAMIENTO, mayor precio. FORMA CONCAVA: efecto marginal decreciente, la curva sube, pero se aplana un poco al final, indica que de 256 a 512 añade mucho valor; pasar de 512 a 1000 añade menos valor adicional. confirma para usar: almacenamiento+I(almacenamiento^2)
+
+
+# Gráfico TAMAÑO PANTALLA vs ln_precio para integrada
+ggplot(df_dedicada, aes(x = tamanio_pantalla, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: tamaño de pantalla vs ln(Precio)",
+       x = "Tamaño de pantalla (IN)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea es no lineal, la linea roja muestra una tendencia clara y estable. De 14 a 15.6 precio baja (mercado saturado), de 15,6 a 18 precio sube (modelos premium, gaming y alta resolucion). confirma para usar: tamanio_pantalla+I(tamanio_pantalla^2)
+
+
+# Gráfico CAPACIDAD TARJETA DE VIDEO vs ln_precio para integrada
+ggplot(df_dedicada, aes(x = memoria_tarjeta_video, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: capacidad de tarjeta de video vs ln(Precio)",
+       x = "capacidad de tarjeta de video (GB)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea es no lineal, la linea roja muestra una tendencia clara y estable. De 14 a 15.6 precio baja (mercado saturado), de 15,6 a 18 precio sube (modelos premium, gaming y alta resolucion). confirma para usar: tamanio_pantalla+I(tamanio_pantalla^2)
+
+# BENCHMARK vs ln_precio para dedicada
+ggplot(df_dedicada, aes(x = benchmark, y = ln_precio)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  labs(title = "Relación: BENCHMARK vs ln(Precio)",
+       x = "BENCHMARK (puntaje)", y = "ln(Precio)") +
+  theme_minimal()
+
+# Interpretacion: la linea roja muestra una tendencia clara y estable. la relación es conpleja no lineal en s; a mayor RAM, mayor precio. FORMA CONCAVA: efecto marginal decreciente, la curva sube, pero se aplana un poco al final, indica que de 8 a 16 añade mucho valor; pasar de 16 a 32 añade menos valor adicional. confirma para usar: ram+I(ram^2)
+
+
+
+
+
+
+# ===========================================================================
+# ANÁLISIS DE CORRELACION ENTRE VARIABLES Y ln(PRECIO)
+# ===========================================================================
+
+# Correlación entre variable y ln_precio
+cor(df_dedicada$memoria_tarjeta_video, df_dedicada$ln_precio, use = "complete.obs")
+
+# Si es < 0.2 → probablemente débil
+# Si es > 0.5 → fuerte
+
+# ===========================================================================
+# ANÁLISIS GRÁFICO ENTRE VARIABLES Y ln(PRECIO)   -  violin
+#                   (funcion)
+# ===========================================================================
+
+graficar_violin_con_box <- function(data, x, y) {
+  # Cargar ggplot2 (asegúrate de tenerlo cargado antes o aquí)
+  if (!require(ggplot2)) stop("Necesitas instalar: install.packages('ggplot2')")
+  
+  # Crear gráfico
+  ggplot(data, aes(x = {{ x }}, y = {{ y }})) +
+    geom_violin(trim = FALSE, alpha = 0.5, fill = "skyblue", color = NA) +
+    geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.8, fill = "white") +
+    geom_jitter(aes(color = {{ x }}), width = 0.2, alpha = 0.6, size = 1) +
+    theme_minimal() +
+    labs(
+      title = paste("Distribución de", deparse(substitute(y)), "por", deparse(substitute(x))),
+      x = deparse(substitute(x)),
+      y = deparse(substitute(y))
+    ) +
+    guides(color = "none") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      plot.title = element_text(size = 12)
+    )
+}
+
+graficar_violin_con_box(df, x = tienda, y = mediana)
+graficar_violin_con_box(df, x = tarjeta_video_tipo, y = ln_precio)
+graficar_violin_con_box(df, x = modelo_tarjeta_video, y = precio)
+graficar_violin_con_box(df_integrada, x = marca_procesador, y = ln_precio)
+graficar_violin_con_box(df_integrada, x = nombre_procesador, y = ln_precio)
+graficar_violin_con_box(df_integrada, x = sistema_operativo, y = ln_precio)
+graficar_violin_con_box(df_integrada, x = definicion_pantalla, y = ln_precio)
+
+# ===========================================================================
+# ANÁLISIS GRÁFICO ENTRE VARIABLES Y ln(PRECIO)   -  box plot
+#                   (funcion)
+# ===========================================================================
+
+graficar_boxplot <- function(data, x, y) {
+  if (!require(ggplot2)) stop("Necesitas instalar: install.packages('ggplot2')")
+  
+  ggplot(data, aes(x = factor({{ x }}), y = {{ y }}, fill = factor({{ x }}))) +
+    geom_boxplot(alpha = 0.7, outlier.color = "red", outlier.size = 1.5) +
+    theme_minimal() +
+    labs(
+      title = paste("Distribución de", deparse(substitute(y)), "por", deparse(substitute(x))),
+      x = deparse(substitute(x)),
+      y = deparse(substitute(y))
+    ) +
+    guides(fill = "none") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      plot.title = element_text(size = 12)
+    )
+}
+
+graficar_boxplot(df_integrada, x = tamanio_pantalla, y = ln_precio)
+
+
+
+
+#---------------------------------------------------------------#
+
+m_lineal <- lm(ln_precio ~ memoria_ram, data = df_integrada)
+m_cuadratico <- lm(ln_precio ~ memoria_ram + I(memoria_ram^2), data = df_integrada)
+m_log <- lm(ln_precio ~ log(memoria_ram), data = df_integrada)
+m_poly3 <- lm(ln_precio ~ poly(memoria_ram, 3, raw = TRUE), data = df_integrada)
+
+AIC(m_lineal, m_cuadratico, m_log, m_poly3)
+# ===========================================================================
+# MODELO ECONOMETRICO DE LAPTOP - GPU DEDIDACA
+# modelo hedónico por Mínimos Cuadrados Ordinarios (MCO)     
+# ===========================================================================
+
+df$fecha <- as.Date(df$fecha)
+#se estrae el mes
+df$mes <- format(df$fecha, "%m")
+
+df <- df %>%
+  mutate(
+    dic = ifelse(format(fecha, "%m") == "12", 1, 0),
+    ene = ifelse(format(fecha, "%m") == "01", 1, 0),
+    feb = ifelse(format(fecha, "%m") == "02", 1, 0),
+    mar = ifelse(format(fecha, "%m") == "03", 1, 0),
+    abr = ifelse(format(fecha, "%m") == "04", 1, 0),
+    may = ifelse(format(fecha, "%m") == "05", 1, 0),
+    jun = ifelse(format(fecha, "%m") == "06", 1, 0),
+    jul = ifelse(format(fecha, "%m") == "07", 1, 0),
+    ago = ifelse(format(fecha, "%m") == "08", 1, 0),
+    sep = ifelse(format(fecha, "%m") == "09", 1, 0),
+    oct = ifelse(format(fecha, "%m") == "10", 1, 0),
+    nov = ifelse(format(fecha, "%m") == "11", 1, 0)
+  )
+
+view(df)
+
+# --- 1. Estimar modelos ---
+
+df_dedicada$tamanio_pantalla <- as.numeric(as.character(df_dedicada$tamanio_pantalla))
+df_dedicada$memoria_ram <- as.numeric(as.character(df_dedicada$memoria_ram))
+df_dedicada$almacenamiento <- as.numeric(as.character(df_dedicada$almacenamiento))
+df_dedicada$benchmark <- as.numeric(as.character(df_dedicada$benchmark))
+df_dedicada$memoria_tarjeta_video <- as.numeric(as.character(df_dedicada$memoria_tarjeta_video))
+
+
+# Modelo 1: Lineal
+
+  #Poner como base a una marca representativa en el modelo
+  #df_dedicada$marca <- relevel(df_dedicada$marca, ref = "LENOVO")
+  
+    model_m1 <- lm(
+    ln_precio ~ 
+      memoria_ram +
+      log(almacenamiento) +
+      poly(benchmark,2,raw=TRUE) +
+      memoria_tarjeta_video +
+      poly(tamanio_pantalla,2,raw = TRUE) +
+      #FALABELLA + 
+      HIRAOKA + 
+      OECHSLE +
+      RIPLEY +
+      octubre +
+      noviembre +
+      diciembre + 
+      abril +
+      mayo + 
+      junio + 
+      julio +
+      agosto +
+      #setiembre +
+      ACER +
+      ASUS + 
+      DELL +
+      #GIGABYTE + 
+      HP +
+      MSI +
+      LENOVO +
+      INTEL +
+      #AMD
+      #FREEDOS
+      FHD +
+      FHD_PLUS +
+      HD +
+      IPS +
+      QHD +
+      QHD_PLUS,
+      #UHD,
+    data = df_dedicada
+  )
+  
+  summary(model_m1)
+  
+  
+  # Gráfico de Residuos vs Ajustados
+  plot(model_m1, which = 1)
+  
+####################################################
+  
+  library(caret)
+  
+  # Definimos el método de control: 10 pliegues (K=10)
+  control_entrenamiento <- trainControl(method = "cv", number = 10)
+  
+  # Entrenamos el modelo usando validación cruzada
+  # Usamos tu fórmula ln_precio ~ ...
+  set.seed(42) # Para que siempre salga igual
+  modelo_cv <- train(
+    ln_precio ~ memoria_ram + log(almacenamiento) + poly(benchmark, 2, raw = TRUE) + 
+      memoria_tarjeta_video + poly(tamanio_pantalla, 2, raw = TRUE) + 
+      HIRAOKA + OECHSLE + RIPLEY + octubre + noviembre + diciembre + 
+      abril + mayo + junio + julio + agosto + ACER + ASUS + DELL + 
+      HP + MSI + LENOVO + INTEL + FHD + FHD_PLUS + HD + IPS + QHD + QHD_PLUS, 
+    data = df_modelo, 
+    method = "lm", 
+    trControl = control_entrenamiento
+  )
+  
+  # Ver los resultados promedio
+  print(modelo_cv)
+  
+  
+  #############################################
+  
+  
+  
+  modelo_completo <- lm(
+    ln_precio ~ 
+      memoria_ram +
+      log(almacenamiento) +
+      poly(benchmark,2,raw=TRUE) +
+      memoria_tarjeta_video +
+      poly(tamanio_pantalla,2,raw = TRUE) +
+      #FALABELLA + 
+      HIRAOKA + 
+      OECHSLE +
+      RIPLEY +
+      octubre +
+      noviembre +
+      diciembre + 
+      abril +
+      mayo + 
+      junio + 
+      julio +
+      agosto +
+      #setiembre +
+      ACER +
+      ASUS + 
+      DELL +
+      #GIGABYTE + 
+      HP +
+      MSI +
+      LENOVO +
+      INTEL ,
+      #AMD
+      #FREEDOS
+      #FHD +
+      #FHD_PLUS +
+      #HD +
+      #IPS +
+      #QHD +
+      #QHD_PLUS,
+    #UHD,
+    data = df_dedicada
+  )
+  
+  
+  
+  modelo_sin_pantalla <- lm(
+    ln_precio ~ 
+      memoria_ram +
+      log(almacenamiento) +
+      poly(benchmark,2,raw=TRUE) +
+      memoria_tarjeta_video +
+      poly(tamanio_pantalla,2,raw = TRUE) +
+      #definicion_pantalla + 
+      marca_procesador +
+      tienda +
+      octubre +
+      noviembre +
+      diciembre + 
+      abril +
+      mayo + 
+      junio + 
+      julio +
+      agosto +
+      #setiembre +
+      marca,
+    #sistema_operativo,
+    data = df_dedicada
+  )
+  
+  
+  anova(model_m1, modelo_completo)
+  
+  summary(df_dedicada)
+  describe(df_dedicada)
+  
+
+# Convertimos la salida del modelo a data frame
+tidy(model_m1) %>%
+  mutate(across(where(is.numeric), ~ round(., 6)))
+
+
+# --- 2. Extraer resultados ---
+tabla <- modelsummary(
+  list("Lineal" = model_m1, "Cuadrático" = model_m2, "Logaritmo" = model_m3, "Polinomio" = model_m4),
+  gof_omit = "AIC|BIC|F|Log",
+  estimate = "{estimate} ({std.error})",
+  statistic = NULL,
+  stars = TRUE,
+  notes = c("Errores estándar entre paréntesis.",
+            "Significancia: *** p<0.01, ** p<0.05, * p<0.1")
+)
+
+# Mostrar tabla
+print(tabla)
+
+# 5. Diagnósticos del modelo ------------------------------------------------
+
+# Resumen del modelo (coeficientes, significancia, R²)
+summary(model_m1)
+
+# Factor de Inflación de Varianza (VIF) - detecta multicolinealidad
+vif_values <- vif(model_m1)
+print("🔍 FACTOR DE INFLACIÓN DE VARIANZA (VIF)")
+print(vif_values)
+# ⚠️ Advertencia si VIF > 5 o 10
+
+# Prueba de heterocedasticidad: Breusch-Pagan
+bp_test <- bptest(model_m1)
+print("🔍 PRUEBA DE BREUSCH-PAGAN (heterocedasticidad)")
+print(bp_test)
+# Si p < 0.05 → hay heterocedasticidad
+
+# Coeficientes con errores estándar robustos (recomendado para IPC)
+cat("\n📊 COEFICIENTES CON ERRORES ROBUSTOS (HC3)\n")
+coeftest(model_m1, vcov = vcovHC(model_m1, type = "HC3"))
+
+
+# Prueba de White (alternativa, útil si hay muchos regresores)
+white_test <- ncvTest(model_m1)
+print("🔍 PRUEBA DE WHITE (no linealidad en varianza)")
+print(white_test)
+
+# 6. Análisis gráfico de residuos -------------------------------------------
+# Deben cumplirse supuestos clásicos
+
+par(mfrow = c(2, 2))
+plot(model_m1)
+par(mfrow = c(1, 1))
+
+# Interpretación:
+# - Gráfico 1 (Residuals vs Fitted): sin patrón curvilíneo → ok
+# - Gráfico 2 (QQ Plot): puntos cerca de la línea → normalidad aceptable
+# - Gráfico 3 (Scale-Location): dispersión constante → homocedasticidad
+# - Gráfico 4 (Cook's D): puntos con influencia alta (> 0.5) deben revisarse
+
+# 7. Guardar resultados para documentación ----------------------------------
+
+# Exportar tabla de coeficientes con errores robustos
+library(texreg)
+
+screenreg(
+  model_ols,
+  override.se = sqrt(diag(vcovHC(model_ols, type = "HC1"))),
+  title = "Modelo Hedónico - Período Base: Ene-Jun 2025",
+  custom.model.names = c("Precio ajustado")
+)
+
+# O guardar en Word/Excel
+library(flextable)
+ft <- flextable(coeftest(model_ols, vcov = vcovHC(model_ols, type = "HC1")))
+save_as_docx(ft, path = "salidas/modelo_hedonico_coeficientes.docx")
+
+# 8. Guardar modelo para uso futuro (encadenamiento) ------------------------
+saveRDS(model_ols, "modelos/modelo_hedonico_2025.rds")
+
+# También guardar los datos usados para replicabilidad
+write.csv(df, "datos/usados_en_modelo_2025.csv", row.names = FALSE)
+
+#1. Datos limpios en R (desde Excel)
+#2. Crear ln_precio = log(precio)
+#3. Para cada variable cuantitativa:
+#   └─ Hacer gráfico: var vs ln_precio
+#   └─ Ver forma de la línea roja (lowess)
+#   └─ Decidir: lineal, cuadrática, log
+#4. Armar modelo final con esas formas
+#5. Diagnosticar: VIF, residuos, errores robustos
+#6. Guardar modelo y coeficientes
+#7. Usar para calcular índice mensual
+
+
+
+# ===========================================================================
+# MODELO ECONOMETRICO DE LAPTOP - GPU INTEGRADA
+# modelo hedónico por Mínimos Cuadrados Ordinarios (MCO)     
+# ===========================================================================
+
+# --- 1. Estimar modelos ---
+
+# Modelo 1: Lineal
+df_integrada$marca <- relevel(df_integrada$marca, ref = "LENOVO")
+
+model_n1 <- lm(
+  ln_precio ~ 
+    #poly(memoria_ram,2,raw = TRUE) +
+    memoria_ram +
+    almacenamiento +
+    poly(benchmark,2,raw = TRUE) +
+    poly(tamanio_pantalla,2,raw = TRUE) +
+    #tamanio_pantalla +
+    #log(tamanio_pantalla) + 
+    definicion_pantalla + 
+    sistema_operativo +
+    marca_procesador +
+    octubre +
+    noviembre +
+    diciembre + 
+    abril +
+    mayo + 
+    junio + 
+    julio +
+    agosto +
+    #setiembre +
+    tienda +
+    marca,
+  data = df_integrada
+)
+
+summary(model_n1)
+
+
+
+# --- 2. Extraer resultados ---
+tabla_n <- modelsummary(
+  list("Lineal" = model_n1, "Cuadrático" = model_n2, "Logaritmo" = model_n3, "Polinomio" = model_n4),
+  gof_omit = "AIC|BIC|F|Log",
+  estimate = "{estimate} ({std.error})",
+  statistic = NULL,
+  stars = TRUE,
+  notes = c("Errores estándar entre paréntesis.",
+            "Significancia: *** p<0.01, ** p<0.05, * p<0.1")
+)
+
+# Mostrar tabla
+print(tabla_n)
+
+
+# 5. Diagnósticos del modelo ------------------------------------------------
+
+# Resumen del modelo (coeficientes, significancia, R²)
+summary(model_n1)
+
+# Factor de Inflación de Varianza (VIF) - detecta multicolinealidad
+vif_values <- vif(model_n1)
+print("🔍 FACTOR DE INFLACIÓN DE VARIANZA (VIF)")
+print(vif_values)
+# ⚠️ Advertencia si VIF > 5 o 10
+
+# Prueba de heterocedasticidad: Breusch-Pagan
+bp_test <- bptest(model_n1)
+print("🔍 PRUEBA DE BREUSCH-PAGAN (heterocedasticidad)")
+print(bp_test)
+# Si p < 0.05 → hay heterocedasticidad
+
+# Coeficientes con errores estándar robustos (recomendado para IPC)
+cat("\n📊 COEFICIENTES CON ERRORES ROBUSTOS (HC3)\n")
+coeftest(model_n1, vcov = vcovHC(model_n1, type = "HC3"))
+
+
+nobs(model_n1)
+table(df_dedicada$sistema_operativo)
+table(df_dedicada$marca)
+
+
+# Prueba de White (alternativa, útil si hay muchos regresores)
+white_test <- ncvTest(model_n1)
+print("🔍 PRUEBA DE WHITE (no linealidad en varianza)")
+print(white_test)
+
+# 6. Análisis gráfico de residuos -------------------------------------------
+# Deben cumplirse supuestos clásicos
+
+par(mfrow = c(2, 2))
+plot(model_n1)
+par(mfrow = c(1, 1))
+
+# Interpretación:
+# - Gráfico 1 (Residuals vs Fitted): sin patrón curvilíneo → ok
+# - Gráfico 2 (QQ Plot): puntos cerca de la línea → normalidad aceptable
+# - Gráfico 3 (Scale-Location): dispersión constante → homocedasticidad
+# - Gráfico 4 (Cook's D): puntos con influencia alta (> 0.5) deben revisarse
+
+# 7. Guardar resultados para documentación ----------------------------------
+
+# Exportar tabla de coeficientes con errores robustos
+library(texreg)
+
+screenreg(
+  model_n3,
+  override.se = sqrt(diag(vcovHC(model_n3, type = "HC1"))),
+  title = "Modelo Hedónico - Período Base: Ene-Jun 2025",
+  custom.model.names = c("Precio ajustado")
+)
+
+# O guardar en Word/Excel
+library(flextable)
+ft <- flextable(coeftest(model_ols, vcov = vcovHC(model_ols, type = "HC1")))
+save_as_docx(ft, path = "salidas/modelo_hedonico_coeficientes.docx")
+
+# 8. Guardar modelo para uso futuro (encadenamiento) ------------------------
+saveRDS(model_ols, "modelos/modelo_hedonico_2025.rds")
+
+# También guardar los datos usados para replicabilidad
+write.csv(df, "datos/usados_en_modelo_2025.csv", row.names = FALSE)
+
+
+
+##### IMPORTANCIA DE VARIABLE ###################
+
+# 1. Preparar un dataset limpio (sin NAs y solo las variables del modelo)
+library(ranger)
+library(vip)
+
+
+# Lista de variables que definiste en tu modelo
+vars_analisis <- c(
+  "ln_precio", "memoria_ram", "almacenamiento", "benchmark", 
+  "memoria_tarjeta_video", "tamanio_pantalla", "HIRAOKA", 
+  "OECHSLE", "RIPLEY", "octubre", "noviembre", "diciembre", 
+  "abril", "mayo", "junio", "julio", "agosto", "ACER", 
+  "ASUS", "DELL", "HP", "MSI", "LENOVO", "INTEL", 
+  "FHD", "FHD_PLUS", "HD", "IPS", "QHD", "QHD_PLUS"
+)
+
+# Creamos un dataset de trabajo filtrando solo esas columnas y quitando NAs
+df_modelo <- df_dedicada[, vars_analisis]
+df_modelo <- na.omit(df_modelo) # Esto elimina las filas con datos faltantes solo en estas columnas
+
+
+library(ranger)
+library(vip)
+
+# Usamos . porque ahora el dataframe SOLO tiene lo que nos interesa
+rf_importancia <- ranger(ln_precio ~ ., data = df_modelo, importance = "permutation")
+
+# El gráfico que vas a presentar
+vip(rf_importancia, geom = "col", fill = "skyblue") + 
+  theme_minimal() +
+  labs(title = "Ranking de Atributos: ¿Qué determina el precio?",
+       x = "Variables", y = "Importancia (Permutación)")
