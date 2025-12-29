@@ -1,0 +1,257 @@
+# ===========================================================================
+# MODELO HEDÓNICO PARA HORNOS MICROONDAS
+# Metodología | Basado en buenas prácticas del BLS y Eurostat
+# Analista: Arnold Jefferson Sanchez Garagate
+# Fecha: 18-09-2025
+# Producto: Hornos microondas
+# Período base: Enero - Junio 2025
+# ===========================================================================
+
+# --- LIBRERÍAS NECESARIAS ---
+library(tidyverse)  # Manipulación de datos
+library(caret)
+library(readxl)     # Leer Excel
+library(dplyr)
+library(sandwich)   # Errores robustos
+library(broom)
+library(knitr)
+library(car)        # VIF, pruebas estadísticas
+library(ggplot2)
+library(randomForest)
+library(lmtest)   # Para bptest
+library(nortest)  # Para alternativa a shapiro.test en muestras grandes
+library(broom)  #mostrar tabla comparativa
+library(modelsummary)
+
+# --- 1. CARGA DE DATOS ---
+
+# ===========================================================================
+# CARGA DE DATOS Y TRANSFORMACIÓN
+
+df <- read_excel("D:/ASANCHEZ/02_ASANCHEZ_2025/05_Modelos_hedonicos/02_MICROONDAS/data_microondas_nov.xlsx", 
+                              sheet = "DATA_USAR") %>%
+mutate(
+  # Convertir variables categóricas a factor
+  tienda = as.factor(tienda),
+  marca = as.factor(marca),
+  color = as.factor(color)
+)
+
+# Transformar el precio a ln_precio
+df <- df %>% mutate(ln_precio = log(precio))
+#view(df)
+
+
+df$periodo2 <- as.numeric(as.character(df$periodo2))
+df$potencia <- as.numeric(as.character(df$potencia))
+df$capacidad <- as.numeric(as.character(df$capacidad))
+df$grill <- as.numeric(as.character(df$grill))
+df$nivel_potencia <- as.numeric(as.character(df$nivel_potencia))
+df$Programas <- as.numeric(as.character(df$Programas))
+
+#-----------------------------------------------------------
+
+# SELECCIÓN DE MODELO BASADA EN AIC: balance entre ajuste y parsinomia
+
+#-----------------------------------------------------------------
+# Criterio de información AIC
+m_lineal <- lm(ln_precio ~ capacidad, data = df)
+m_cuadratico <- lm(ln_precio ~ capacidad, + I(capacidad^2), data = df)
+m_log <- lm(ln_precio ~ log(capacidad,), data = df)
+m_poly3 <- lm(ln_precio ~ poly(capacidad, 3, raw = TRUE), data = df)
+
+AIC(m_lineal, m_cuadratico, m_log, m_poly3)
+#-----------------------------------------------------------------#
+
+
+# ===========================================================================
+# MODELO ECONOMETRICO DE LAPTOP - GPU DEDIDACA
+# modelo hedónico por Mínimos Cuadrados Ordinarios (MCO)     
+# ===========================================================================#
+
+# --- 1. Estimar modelos ---
+
+# Modelo 1: Lineal
+
+#Poner como base a una marca representativa en el modelo
+df$marca <- relevel(df$marca, ref = "LG")
+
+model_z1 <- lm(
+  ln_precio ~ 
+    #potencia +
+    poly(potencia,2,raw = TRUE)+
+    capacidad +
+    #poly(capacidad,2,raw = TRUE)+
+    grill +
+    nivel_potencia +
+    #poly(tamanio_pantalla,2,raw = TRUE) +
+    #Programas + 
+    color +
+    marca,
+  data = df
+)
+
+summary(model_z1)
+
+hist(residuals(model_z1), breaks = 50, main = "Histograma de residuos", xlab = "Residuos")
+
+ks.test(residuals(model_z1), "pnorm", mean(residuals(model_z1)), sd(residuals(model_z1)))
+
+# --- 2. Extraer resultados ---
+tabla <- modelsummary(
+  list("Lineal" = model_m1, "Cuadrático" = model_m2, "Logaritmo" = model_m3, "Polinomio" = model_m4),
+  gof_omit = "AIC|BIC|F|Log",
+  estimate = "{estimate} ({std.error})",
+  statistic = NULL,
+  stars = TRUE,
+  notes = c("Errores estándar entre paréntesis.",
+            "Significancia: *** p<0.01, ** p<0.05, * p<0.1")
+)
+
+# Mostrar tabla
+print(tabla)
+
+# 5. Diagnósticos del modelo ------------------------------------------------
+
+# Resumen del modelo (coeficientes, significancia, R²)
+summary(model_z1)
+
+# Factor de Inflación de Varianza (VIF) - detecta multicolinealidad
+vif_values <- vif(model_z1)
+print("🔍 FACTOR DE INFLACIÓN DE VARIANZA (VIF)")
+print(vif_values)
+# ⚠️ Advertencia si VIF > 5 o 10
+
+# Prueba de heterocedasticidad: Breusch-Pagan
+bp_test <- bptest(model_z1)
+print("🔍 PRUEBA DE BREUSCH-PAGAN (heterocedasticidad)")
+print(bp_test)
+# Si p < 0.05 → hay heterocedasticidad
+
+# Coeficientes con errores estándar robustos (recomendado para IPC)
+cat("\n📊 COEFICIENTES CON ERRORES ROBUSTOS (HC1)\n")
+coeftest(model_z1, vcov = vcovHC(model_z1, type = "HC2"))
+
+# Prueba de White (alternativa, útil si hay muchos regresores)
+white_test <- ncvTest(model_z1)
+print("🔍 PRUEBA DE WHITE (no linealidad en varianza)")
+print(white_test)
+
+# 6. Análisis gráfico de residuos -------------------------------------------
+# Deben cumplirse supuestos clásicos
+
+par(mfrow = c(2, 2))
+plot(model_z1)
+par(mfrow = c(1, 1))
+
+# Interpretación:
+# - Gráfico 1 (Residuals vs Fitted): sin patrón curvilíneo → ok
+# - Gráfico 2 (QQ Plot): puntos cerca de la línea → normalidad aceptable
+# - Gráfico 3 (Scale-Location): dispersión constante → homocedasticidad
+# - Gráfico 4 (Cook's D): puntos con influencia alta (> 0.5) deben revisarse
+
+# 7. Guardar resultados para documentación ----------------------------------
+
+# Exportar tabla de coeficientes con errores robustos
+library(texreg)
+
+screenreg(
+  model_ols,
+  override.se = sqrt(diag(vcovHC(model_ols, type = "HC1"))),
+  title = "Modelo Hedónico - Período Base: Ene-Jun 2025",
+  custom.model.names = c("Precio ajustado")
+)
+
+# O guardar en Word/Excel
+library(flextable)
+ft <- flextable(coeftest(model_ols, vcov = vcovHC(model_ols, type = "HC1")))
+save_as_docx(ft, path = "salidas/modelo_hedonico_coeficientes.docx")
+
+# 8. Guardar modelo para uso futuro (encadenamiento) ------------------------
+saveRDS(model_ols, "modelos/modelo_hedonico_2025.rds")
+
+# También guardar los datos usados para replicabilidad
+write.csv(df, "datos/usados_en_modelo_2025.csv", row.names = FALSE)
+
+#1. Datos limpios en R (desde Excel)
+#2. Crear ln_precio = log(precio)
+#3. Para cada variable cuantitativa:
+#   └─ Hacer gráfico: var vs ln_precio
+#   └─ Ver forma de la línea roja (lowess)
+#   └─ Decidir: lineal, cuadrática, log
+#4. Armar modelo final con esas formas
+#5. Diagnosticar: VIF, residuos, errores robustos
+#6. Guardar modelo y coeficientes
+#7. Usar para calcular índice mensual
+
+
+
+# ===========================================================================
+# ANÁLISIS GRÁFICO ENTRE VARIABLES Y ln(PRECIO)   -  violin
+#                   (funcion)
+# ===========================================================================
+
+graficar_violin_con_box <- function(data, x, y) {
+  # Cargar ggplot2 (asegúrate de tenerlo cargado antes o aquí)
+  if (!require(ggplot2)) stop("Necesitas instalar: install.packages('ggplot2')")
+  
+  # Crear gráfico
+  ggplot(data, aes(x = {{ x }}, y = {{ y }})) +
+    geom_violin(trim = FALSE, alpha = 0.5, fill = "skyblue", color = NA) +
+    geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.8, fill = "white") +
+    geom_jitter(aes(color = {{ x }}), width = 0.2, alpha = 0.6, size = 1) +
+    theme_minimal() +
+    labs(
+      title = paste("Distribución de", deparse(substitute(y)), "por", deparse(substitute(x))),
+      x = deparse(substitute(x)),
+      y = deparse(substitute(y))
+    ) +
+    guides(color = "none") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      plot.title = element_text(size = 12)
+    )
+}
+
+graficar_violin_con_box(df, x = tienda, y = ln_precio)
+graficar_violin_con_box(df, x = marca, y = ln_precio)
+graficar_violin_con_box(df, x = color, y = ln_precio)
+graficar_violin_con_box(df, x = nucleos, y = ln_precio)
+graficar_violin_con_box(df_vertical_cable, x = potencia_watts, y = ln_precio)
+graficar_violin_con_box(df_vertical_cable, x = filtro_hepa, y = ln_precio)
+graficar_violin_con_box(df_robot, x = sistema_operativo, y = ln_precio)
+graficar_violin_con_box(df_robot, x = definicion_pantalla, y = ln_precio)
+
+colnames(df)
+
+
+# ===========================================================================
+# ANÁLISIS GRÁFICO ENTRE VARIABLES Y ln(PRECIO)   -  box plot
+#                   (funcion)
+# ===========================================================================
+
+graficar_boxplot <- function(data, x, y) {
+  if (!require(ggplot2)) stop("Necesitas instalar: install.packages('ggplot2')")
+  
+  ggplot(data, aes(x = factor({{ x }}), y = {{ y }}, fill = factor({{ x }}))) +
+    geom_boxplot(alpha = 0.7, outlier.color = "red", outlier.size = 1.5) +
+    theme_minimal() +
+    labs(
+      title = paste("Distribución de", deparse(substitute(y)), "por", deparse(substitute(x))),
+      x = deparse(substitute(x)),
+      y = deparse(substitute(y))
+    ) +
+    guides(fill = "none") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      plot.title = element_text(size = 12)
+    )
+}
+
+graficar_boxplot(df, x = capacidad, y = ln_precio)
+graficar_boxplot(df, x = potencia, y = ln_precio)
+graficar_boxplot(df, x = grill, y = ln_precio)
+graficar_boxplot(df, x = ram, y = ln_precio)
+graficar_boxplot(df, x = screen_size, y = ln_precio)
+graficar_boxplot(df, x = camara_frontal, y = ln_precio)
+graficar_boxplot(df, x = camara_posterior, y = ln_precio)
