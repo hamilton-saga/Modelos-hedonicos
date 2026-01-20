@@ -1,0 +1,216 @@
+library(shiny)
+library(shinythemes)
+library(shinyjs)
+
+# 1. Cargar el modelo
+modelo <- readRDS("modelo_laptops.rds")
+
+# 2. Cargar el Maestro de Benchmarks (CSV simple)
+# Columnas: procesador | puntaje
+maestro_bench <- read.csv(
+  "benchmarks_maestro.csv",
+  sep = ";",
+  stringsAsFactors = FALSE
+)
+
+# Eliminar espacios invisibles en nombres
+maestro_bench$procesador <- trimws(maestro_bench$procesador)
+
+ui <- fluidPage(
+  useShinyjs(),
+  theme = shinytheme("flatly"),
+  titlePanel("INEI - Calculadora de precios para laptop con tarjeta dedicada"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      h4("1. Identificación del Procesador"),
+      
+      selectizeInput(
+        "proc_nombre",
+        "Escribe o busca el Procesador:",
+        choices = setNames(
+          maestro_bench$procesador,
+          maestro_bench$procesador
+        ),
+        options = list(
+          placeholder = "Ej: Core i5...",
+          allowEmptyOption = TRUE
+        )
+      ),
+      
+      numericInput(
+        "benchmark",
+        "Puntaje Benchmark Asignado:",
+        value = 0,
+        min = 0,
+        step = 0.01
+      ),
+      
+      hr(),
+      h4("2. Hardware y Pantalla"),
+      numericInput("ram", "Memoria RAM (GB):", value = 8),
+      numericInput("almacenamiento", "Almacenamiento (GB):", value = 256),
+      numericInput("vram", "Memoria Video (GB):", value = 2),
+      
+      selectInput(
+        "pantalla",
+        "Tamaño de Pantalla:",
+        choices = list(
+          "13.3' o menos (Base)" = "base",
+          "14'" = "pantalla_14_145",
+          "15.6'" = "pantalla_15_165",
+          "16' a más" = "pantalla_16_196"
+        )
+      ),
+      
+      hr(),
+      h4("3. Mercado"),
+      selectInput(
+        "tienda",
+        "Tienda:",
+        choices = list(
+          "Oechsle/Otros (Base)" = "base",
+          "Falabella" = "FALABELLA",
+          "Hiraoka" = "HIRAOKA",
+          "Ripley" = "RIPLEY"
+        )
+      ),
+      
+      selectInput(
+        "marca",
+        "Marca:",
+        choices = list(
+          "HP/Otros (Base)" = "base",
+          "Lenovo" = "LENOVO",
+          "Asus" = "ASUS",
+          "Acer" = "ACER",
+          "Dell" = "DELL",
+          "MSI" = "MSI"
+        )
+      ),
+      
+      selectInput(
+        "mes",
+        "Mes:",
+        choices = list(
+          "Diciembre (Base)" = "base",
+          "Abril" = "abril",
+          "Mayo" = "mayo",
+          "Junio" = "junio",
+          "Agosto" = "agosto",
+          "Setiembre" = "setiembre",
+          "Octubre" = "octubre",
+          "Noviembre" = "noviembre"
+        )
+      ),
+      
+      checkboxInput("intel", "Es Procesador Intel", value = TRUE),
+      checkboxInput("freedos", "Sistema FreeDOS", value = FALSE)
+    ),
+    
+    mainPanel(
+      wellPanel(
+        h3("Precio de Mercado Estimado", align = "center"),
+        h1(textOutput("precio_final"), align = "center", style = "color: #2c3e50;"),
+        h5(textOutput("label_puntos"), align = "center")
+      )
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  # Bloquear el benchmark (solo automático)
+  observe({
+    disable("benchmark")
+  })
+  
+  # Autocompletar benchmark según procesador
+  observeEvent(input$proc_nombre, {
+    if (!is.null(input$proc_nombre) && input$proc_nombre != "") {
+      
+      puntos <- maestro_bench$puntaje[
+        maestro_bench$procesador == input$proc_nombre
+      ]
+      
+      if (length(puntos) > 0) {
+        updateNumericInput(
+          session,
+          "benchmark",
+          value = puntos[1]
+        )
+      } else {
+        updateNumericInput(
+          session,
+          "benchmark",
+          value = 0
+        )
+      }
+    }
+  })
+  
+  output$precio_final <- renderText({
+    req(input$benchmark > 0)
+    
+    nuevo_dato <- data.frame(
+      memoria_ram = input$ram,
+      almacenamiento = input$almacenamiento,
+      benchmark_2 = input$benchmark,
+      memoria_tarjeta_video = input$vram,
+      
+      pantalla_14_145 = ifelse(input$pantalla == "pantalla_14_145", 1, 0),
+      pantalla_15_165 = ifelse(input$pantalla == "pantalla_15_165", 1, 0),
+      pantalla_16_196 = ifelse(input$pantalla == "pantalla_16_196", 1, 0),
+      
+      FALABELLA = ifelse(input$tienda == "FALABELLA", 1, 0),
+      HIRAOKA = ifelse(input$tienda == "HIRAOKA", 1, 0),
+      RIPLEY = ifelse(input$tienda == "RIPLEY", 1, 0),
+      
+      abril = ifelse(input$mes == "abril", 1, 0),
+      mayo = ifelse(input$mes == "mayo", 1, 0),
+      junio = ifelse(input$mes == "junio", 1, 0),
+      julio = ifelse(input$mes == "julio", 1, 0),
+      agosto = ifelse(input$mes == "agosto", 1, 0),
+      setiembre = ifelse(input$mes == "setiembre", 1, 0),
+      octubre = ifelse(input$mes == "octubre", 1, 0),
+      noviembre = ifelse(input$mes == "noviembre", 1, 0),
+      
+      LENOVO = ifelse(input$marca == "LENOVO", 1, 0),
+      ASUS = ifelse(input$marca == "ASUS", 1, 0),
+      ACER = ifelse(input$marca == "ACER", 1, 0),
+      DELL = ifelse(input$marca == "DELL", 1, 0),
+      MSI = ifelse(input$marca == "MSI", 1, 0),
+      
+      INTEL = ifelse(input$intel, 1, 0),
+      FREEDOS = ifelse(input$freedos, 1, 0)
+    )
+    
+    
+    res_log <- predict(modelo, newdata = nuevo_dato)
+    
+    paste0(
+      "S/ ",
+      format(
+        round(exp(res_log), 2),
+        big.mark = ",",
+        nsmall = 2
+      )
+    )
+  })
+  
+  output$label_puntos <- renderText({
+    if (!is.null(input$proc_nombre) && input$proc_nombre != "") {
+      paste(
+        "Puntaje detectado para",
+        input$proc_nombre,
+        ":",
+        input$benchmark,
+        "pts."
+      )
+    }
+  })
+}
+
+shinyApp(ui = ui, server = server)
+
+
